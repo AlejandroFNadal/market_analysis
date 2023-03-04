@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Generates a bucket, a CodeBuild project, a role for the codebuild that gives auth to access to logs and to the bucket
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 static website bucket
+  GitHubRepoUrl:
+    Description: URL of the GitHub repository to build
+    Type: String
+  GitHubBranch:
+    Description: Branch to build from the GitHub repository
+    Type: String
+  GitHubAccessToken:
+    Description: Access token for the Github repository
+    Type: String
+Resources:
+  S3BucketForWebsiteContent:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+      BucketName: !Ref S3BucketName
+  CBProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: "Market-Analyzer"
+      Artifacts:
+        Type: "S3"
+        Location: !Ref S3BucketForWebsiteContent
+        EncryptionDisabled: true
+        Name: "/"
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: 'aws/codebuild/standard:5.0'
+        Type: 'LINUX_CONTAINER'
+        EnvironmentVariables:
+          - Name: GITHUB_REPO_URL
+            Value: !Ref GitHubRepoUrl
+          - Name: GITHUB_BRANCH
+            Value: !Ref GitHubBranch
+          - Name: GITHUB_ACCESS_TOKEN
+            Value: !Ref GitHubAccessToken
+      Source:
+        Type: 'GITHUB'
+        Location: !Ref GitHubRepoUrl
+        Auth:
+          Type: 'OAUTH'
+      ServiceRole: !Ref CodeBuildServiceRole
+  CodeBuildSourceCredential:
+    Type: "AWS::CodeBuild::SourceCredential"
+    Properties:
+      AuthType: "PERSONAL_ACCESS_TOKEN"
+      ServerType: "GITHUB"
+      Token: !Ref GitHubAccessToken
+
+  CodeBuildServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: codebuild-service
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - 's3:ListBucket'
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+Outputs:
+  BucketURL:
+    Value: !GetAtt S3BucketForWebsiteContent.WebsiteURL
+    Description: Name of S3 bucket to hold website content
+
