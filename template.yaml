@@ -55,14 +55,18 @@ Resources:
                 "cognito-identity.amazon.com:aud" : !Ref IdentityPool
               "ForAnyValue:StringLike":
                 "cognito-identity.amazonaws.com:amr": authenticated
-      Policies:
-        - PolicyName: allowS3Access
-          PolicyDocument:
-            Version: "2021-10-17"
-            Statement:
-              - Effect: Allow
-                Action: 's3:GetObject'
-                Resource: !Ref S3BucketForWebsiteContent
+  CognitoUserPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: 'allowS3Access'
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action: ['s3:GetObject']
+            Resource: !GetAtt S3BucketForWebsiteContent.Arn
+      Roles: 
+        - !Ref CognitoAuthorizedRole
   IdentityPoolRoleMapping:
     Type: "AWS::Cognito::IdentityPoolRoleAttachment"
     Properties:
@@ -74,9 +78,10 @@ Resources:
     Properties:
       IdentityPoolName: 'market-analysis-identity-pool' 
       CognitoIdentityProviders:
-        - ClientId: !Ref UserPool
+        - ClientId: !Ref UserPoolClient
           ProviderName: !GetAtt UserPool.ProviderName
       SupportedLoginProviders: {}
+      AllowUnauthenticatedIdentities: false
   UserPoolClient:
     Type: 'AWS::Cognito::UserPoolClient'
     Properties:
