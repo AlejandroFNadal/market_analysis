@@ -1,0 +1,237 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: An AWS SAM template for the Kafka producer and consumer Lambdas with DynamoDB tables.
+
+Parameters:
+  EC2KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance.
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+
+  EC2AMI:
+    Description: Amazon Machine Image (AMI) ID for the EC2 instance.
+    Type: String
+    Default: ami-06db4d78cb1d3bbf9 
+    ConstraintDescription: Must be a valid AMI ID.
+
+Resources:
+  ProducerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: producer.handler
+      Runtime: python3.8
+      CodeUri: producer/
+      Events:
+        ProducerTimer:
+          Type: Schedule
+          Properties:
+            Schedule: rate(2 minutes)
+      Environment:
+        Variables:
+          BLOCK_CONFIG_TABLE: BlockConfig
+          GAS_COST_TABLE: GasCostPerHour
+          KAFKA_SERVER_AWS: True
+
+  ConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: consumer.handler
+      Runtime: python3.8
+      CodeUri: consumer/
+      Events:
+        ConsumerTimer:
+          Type: Schedule
+          Properties:
+            Schedule: rate(2 minutes)
+      Environment:
+        Variables:
+          BLOCK_CONFIG_TABLE: BlockConfig
+          GAS_COST_TABLE: GasCostPerHour
+          KAFKA_SERVER_AWS: True
+          S3_BUCKET_NAME: !Ref DataBucket 
+          SAVE_TO_S3: True
+
+  BlockConfigTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: BlockConfig
+      AttributeDefinitions:
+        - AttributeName: config_type
+          AttributeType: S
+      KeySchema:
+        - AttributeName: config_type
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  GasCostPerHourTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: GasCostPerHour
+      AttributeDefinitions:
+        - AttributeName: DATE
+          AttributeType: S
+        - AttributeName: HOUR
+          AttributeType: S
+      KeySchema:
+        - AttributeName: DATE
+          KeyType: HASH
+        - AttributeName: HOUR
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 10
+        WriteCapacityUnits: 5
+
+  # EC2 Resources
+  EC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: t2.small
+      ImageId: !Ref EC2AMI
+      KeyName: !Ref EC2KeyName
+      SecurityGroups:
+        - !Ref EC2SecurityGroup
+      Tags:
+        - Key: 'Name'
+          Value: 'KafkaAirflowServer'
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            # Update the system
+            sudo apt-get update
+
+            # Install JDK for Kafka
+            sudo apt-get install -y default-jdk
+
+            # Download Kafka
+            wget https://www.apache.org/dyn/closer.cgi?path=/kafka/2.7.0/kafka_2.13-2.7.0.tgz
+            tar -xvzf kafka_2.13-2.7.0.tgz
+            cd kafka_2.13-2.7.0
+
+            # Start Kafka
+            nohup bin/zookeeper-server-start.sh config/zookeeper.properties &
+            sleep 5
+            nohup bin/kafka-server-start.sh config/server.properties &
+
+            # Install Airflow
+            sudo apt-get install -y python3-pip
+            pip3 install apache-airflow
+
+            # Initialize the Airflow DB (SQLite by default)
+            airflow db init
+
+            # Start Airflow 
+            nohup airflow scheduler &
+            nohup airflow webserver &
+
+  
+  EC2SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable SSH access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0  # Restrict this to your IP for better security
+
+  # S3 Bucket
+  DataBucket:
+    Type: 'AWS::S3::Bucket'
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !Sub arn:aws:s3:::${DataBucket}/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/BlockConfig
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/GasCostPerHour
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                Resource:
+                  "*"
+                
+  # EC2 Instance Role
+  EC2InstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+
+  EC2InstanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: EC2Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource:
+                  - !Sub arn:aws:s3:::${DataBucket}/*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/BlockConfig
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/GasCostPerHour
+
+Outputs:
+  ProducerFunctionArn:
+    Description: Producer Lambda Function ARN
+    Value: !GetAtt ProducerFunction.Arn
+
+  ConsumerFunctionArn:
+    Description: Consumer Lambda Function ARN
+    Value: !GetAtt ConsumerFunction.Arn
+
+  BlockConfigTableArn:
+    Description: BlockConfig DynamoDB Table ARN
+    Value: !GetAtt BlockConfigTable.Arn
+
+  GasCostPerHourTableArn:
+    Description: GasCostPerHour DynamoDB Table ARN
+    Value: !GetAtt GasCostPerHourTable.Arn
+
+ 
