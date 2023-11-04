@@ -82,14 +82,14 @@ def main():
     try:
         message = consumer.poll(1.0)
         if message is None:
-            continue
+            return -1
         if message.error():
             logger.error(f"Error in message consumption: {message.error()}")
         else:
             block = json.loads(message.value().decode('utf-8'))
             batch_key = message.key().decode('utf-8')
             process_batch(batch_key, block)
-
+            return 0
     except KeyboardInterrupt:
         logger.info("Consumer interrupted. Closing connection...")
     finally:
