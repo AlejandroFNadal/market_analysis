@@ -8,11 +8,13 @@ from confluent_kafka import Consumer
 from utils import wei_to_eth
 import os
 from dotenv import load_dotenv
+import sys
 
+logger.remove()
+logger.add(sys.stdout, level='DEBUG')
 # if this envvar flag is enabled, we are in AWS and we need to write to S3
-SAVE_TO_S3 = os.environ.get('SAVE_TO_S3', False)
 load_dotenv()
-api_key = os.environ['ETHERSCAN_API_KEY']
+SAVE_TO_S3 = os.environ['SAVE_TO_S3']
 
 
 def average(lst):
@@ -40,6 +42,7 @@ def save_to_s3(timestamp, batch_key, avg_gas, usd_price):
     csv_content = f"timestamp,batch_key,avg_gas,usd_price\n{timestamp},{batch_key},{avg_gas},{usd_price}"
     # Upload to S3
     s3.put_object(Body=csv_content, Bucket=bucket_name, Key=key)
+    logger.debug(f"Saved to S3: {key}")
 
 
 def process_batch(batch_key, block):
@@ -52,10 +55,11 @@ def process_batch(batch_key, block):
 
     save_to_csv(timestamp, batch_key, avg_gas, usd_price)
 
-    if SAVE_TO_S3:
-        save_to_s3(timestamp, batch_key, avg_gas)
+    if SAVE_TO_S3 == 'true':
+        save_to_s3(timestamp, batch_key, avg_gas, usd_price)
 
     logger.info(f"Processed batch with key {batch_key}. Average gas: {avg_gas}, USD price: {usd_price}")
+
 
 def get_ec2_ip_by_tag(tag_name, tag_value):
     """Get the public IP of an EC2 instance by its tag."""
@@ -65,8 +69,10 @@ def get_ec2_ip_by_tag(tag_name, tag_value):
     instance = response['Reservations'][0]['Instances'][0]
     return instance['PublicIpAddress']
 
+
 def main():
-    if os.environ['KAFKA_SERVER_AWS'] == 'True':
+    """Get message from Kafka, calculate stats, save to S3."""
+    if os.environ['KAFKA_SERVER_AWS'] == 'true':
         ip = get_ec2_ip_by_tag('Name', 'KafkaAirflowServer')
     else:
         ip = 'localhost'
@@ -75,13 +81,18 @@ def main():
         'group.id': 'eth_consumer_group',
         'auto.offset.reset': 'earliest'
     }
-
-    consumer = Consumer(conf)
-    consumer.subscribe(['eth'])
+    try:
+        logger.debug("Creating consumer...")
+        consumer = Consumer(conf)
+        consumer.subscribe(['eth'])
+    except Exception as e:
+        logger.error(f"Error creating consumer: {e}")
+        return -1
 
     try:
-        message = consumer.poll(1.0)
+        message = consumer.poll(5.0)
         if message is None:
+            logger.debug("No message received")
             return -1
         if message.error():
             logger.error(f"Error in message consumption: {message.error()}")
@@ -92,11 +103,15 @@ def main():
             return 0
     except KeyboardInterrupt:
         logger.info("Consumer interrupted. Closing connection...")
+    except Exception as e:
+        logger.error(f"Error in message consumption: {e}")
+        return -1
     finally:
         consumer.close()
 
 
-def handler():
+def handler(event, context):
+    """AWS Lambda handler."""
     main()
 
 
