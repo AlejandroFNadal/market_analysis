@@ -79,15 +79,44 @@ Resources:
             wget "https://downloads.apache.org/kafka/3.6.0/kafka_2.13-3.6.0.tgz"
             tar -xvzf kafka_2.13-3.6.0.tgz
             cd kafka_2.13-3.6.0
-            
-            # Start Kafka
-            nohup bin/zookeeper-server-start.sh config/zookeeper.properties &
-            sleep 5
-            nohup bin/kafka-server-start.sh config/server.properties &
+            echo '#!/bin/bash' > /usr/local/bin/configure-kafka.sh
+            echo 'PRIVATE_IP=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)' >> /usr/local/bin/configure-kafka.sh
+            echo 'PUBLIC_IP=$(curl http://169.254.169.254/latest/meta-data/public-ipv4)' >> /usr/local/bin/configure-kafka.sh
+            echo '# Backup the original config file' >> /usr/local/bin/configure-kafka.sh
+            echo 'cp /kafka_2.13-3.6.0/config/server.properties  /kafka_2.13-3.6.0/config/server.properties.backup' >> /usr/local/bin/configure-kafka.sh
+            echo '# Update the properties file' >> /usr/local/bin/configure-kafka.sh
 
+            # Uncomment the listeners and advertised.listeners if they are commented
+            echo 'sed -i "s/^#listeners=/listeners=/" /kafka_2.13-3.6.0/config/server.properties' >> /usr/local/bin/configure-kafka.sh
+            echo 'sed -i "s/^#advertised.listeners=/advertised.listeners=/" /kafka_2.13-3.6.0/config/server.properties' >> /usr/local/bin/configure-kafka.sh
+            # replacing the variables.
+            echo 'sed -i "s/^listeners=PLAINTEXT:\/\/.*/listeners=PLAINTEXT:\/\/$PRIVATE_IP:9092/"  /kafka_2.13-3.6.0/config/server.properties' >> /usr/local/bin/configure-kafka.sh
+            echo 'sed -i "s/^advertised.listeners=PLAINTEXT:\/\/.*/advertised.listeners=PLAINTEXT:\/\/$PUBLIC_IP:9092/" /kafka_2.13-3.6.0/config/server.properties' >> /usr/local/bin/configure-kafka.sh 
+            echo 'nohup /kafka_2.13-3.6.0/bin/zookeeper-server-start.sh /kafka_2.13-3.6.0/config/zookeeper.properties &' >> /usr/local/bin/configure-kafka.sh
+            echo 'sleep 5' >> /usr/local/bin/configure-kafka.sh
+            echo 'nohup /kafka_2.13-3.6.0/bin/kafka-server-start.sh /kafka_2.13-3.6.0/config/server.properties &' >> /usr/local/bin/configure-kafka.sh
+
+            
+            # allow execution
+            chmod +x /usr/local/bin/configure-kafka.sh
+            echo '[Unit]' > /etc/systemd/system/kafka-configure.service
+            echo 'Description=Configure Kafka Server Properties' >> /etc/systemd/system/kafka-configure.service
+            echo 'After=network.target' >> /etc/systemd/system/kafka-configure.service
+            echo ''  >> /etc/systemd/system/kafka-configure.service
+            echo '[Service]' >> /etc/systemd/system/kafka-configure.service
+            echo 'Type=oneshot' >> /etc/systemd/system/kafka-configure.service
+            echo 'ExecStart=/usr/local/bin/configure-kafka.sh' >> /etc/systemd/system/kafka-configure.service
+            echo 'RemainAfterExit=yes' >> /etc/systemd/system/kafka-configure.service
+            echo '' >> /etc/systemd/system/kafka-configure.service
+            echo '[Install]' >> /etc/systemd/system/kafka-configure.service
+            echo 'WantedBy=multi-user.target' >> /etc/systemd/system/kafka-configure.service
+            systemctl enable kafka-configure.service
+            systemctl start kafka-configure.service
+
+            
             # Install Airflow
-            sudo apt-get install -y python3-pip
-            pip3 install apache-airflow
+            sudo apt-get install -y python3-pip 
+            pip3 install apache-airflow --break-system-packages
 
             # Initialize the Airflow DB (SQLite by default)
             airflow db init
