@@ -14,42 +14,12 @@ Parameters:
     Default: ami-06db4d78cb1d3bbf9 
     ConstraintDescription: Must be a valid AMI ID.
 
-Resources:
-  ProducerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: producer.handler
-      Runtime: python3.8
-      CodeUri: producer/
-      Events:
-        ProducerTimer:
-          Type: Schedule
-          Properties:
-            Schedule: rate(2 minutes)
-      Environment:
-        Variables:
-          BLOCK_CONFIG_TABLE: BlockConfig
-          GAS_COST_TABLE: GasCostPerHour
-          KAFKA_SERVER_AWS: True
+  ETHERSCANAPIKEY:
+    Description: Key for etherscan api
+    Type: String
+    ConstraintDescription: Without a key, the producer cannot reach to the API
 
-  ConsumerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: consumer.handler
-      Runtime: python3.8
-      CodeUri: consumer/
-      Events:
-        ConsumerTimer:
-          Type: Schedule
-          Properties:
-            Schedule: rate(2 minutes)
-      Environment:
-        Variables:
-          BLOCK_CONFIG_TABLE: BlockConfig
-          GAS_COST_TABLE: GasCostPerHour
-          KAFKA_SERVER_AWS: True
-          S3_BUCKET_NAME: !Ref DataBucket 
-          SAVE_TO_S3: True
+Resources:
 
   BlockConfigTable:
     Type: AWS::DynamoDB::Table
@@ -101,15 +71,15 @@ Resources:
             #!/bin/bash
             # Update the system
             sudo apt-get update
-
+            sudo apt install tmux
             # Install JDK for Kafka
             sudo apt-get install -y default-jdk
 
             # Download Kafka
-            wget https://www.apache.org/dyn/closer.cgi?path=/kafka/2.7.0/kafka_2.13-2.7.0.tgz
-            tar -xvzf kafka_2.13-2.7.0.tgz
-            cd kafka_2.13-2.7.0
-
+            wget "https://downloads.apache.org/kafka/3.6.0/kafka_2.13-3.6.0.tgz"
+            tar -xvzf kafka_2.13-3.6.0.tgz
+            cd kafka_2.13-3.6.0
+            
             # Start Kafka
             nohup bin/zookeeper-server-start.sh config/zookeeper.properties &
             sleep 5
@@ -136,7 +106,14 @@ Resources:
           FromPort: '22'
           ToPort: '22'
           CidrIp: 0.0.0.0/0  # Restrict this to your IP for better security
-
+        - IpProtocol: 'tcp'
+          FromPort: 9092
+          ToPort: 9092
+          CidrIp: '0.0.0.0/0'  # Kafka port
+        - IpProtocol: 'tcp'
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: '0.0.0.0/0'  # Airflow port
   # S3 Bucket
   DataBucket:
     Type: 'AWS::S3::Bucket'
@@ -179,7 +156,50 @@ Resources:
                   - ec2:DescribeInstances
                 Resource:
                   "*"
-                
+
+  ProducerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: producer.handler
+      Runtime: python3.10
+      CodeUri: producer/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      Events:
+        ProducerTimer:
+          Type: Schedule
+          Properties:
+            Schedule: rate(2 minutes)
+      Environment:
+        Variables:
+          BLOCK_CONFIG_TABLE: BlockConfig
+          GAS_COST_TABLE: GasCostPerHour
+          KAFKA_SERVER_AWS: True
+          ETHERSCAN_API_KEY: !Ref ETHERSCANAPIKEY
+          DYNAMODB_SERVER_AWS: True
+
+  ConsumerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: consumer.handler
+      Runtime: python3.10
+      CodeUri: consumer/
+      Timeout: 30
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        ConsumerTimer:
+          Type: Schedule
+          Properties:
+            Schedule: rate(2 minutes)
+      Environment:
+        Variables:
+          BLOCK_CONFIG_TABLE: BlockConfig
+          GAS_COST_TABLE: GasCostPerHour
+          KAFKA_SERVER_AWS: True
+          S3_BUCKET_NAME: !Ref DataBucket 
+          SAVE_TO_S3: True              
+          DYNAMODB_SERVER_AWS: True
+            #
   # EC2 Instance Role
   EC2InstanceProfile:
     Type: 'AWS::IAM::InstanceProfile'
