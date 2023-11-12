@@ -1,5 +1,6 @@
 """
 Airflow DAG. Reads from a set of CSV files that are inside a folder/S3 bucket.
+
 The files are stored with a datetime partitions, so the DAG will read a year/month/day/hour at a time.
 It will take the csv, calculate the average of them all, and store the results in a DynamoDB table.
 """
@@ -9,7 +10,11 @@ import json
 import pendulum
 import os
 import csv
+import boto3
 from airflow.decorators import dag, task
+from decimal import Decimal
+
+s3_bucket = os.environ['S3_BUCKET_NAME']
 
 
 @dag(
@@ -21,40 +26,71 @@ from airflow.decorators import dag, task
 def pipeline():
     @task()
     def extract(ts=None):
-        """Accesses to the given folder based on the execution date and reads the CSV files."""
+        """Access to the given folder based on the execution date and reads the CSV files."""
         # get context variable to see if we want to target a s3 bucket or a local folder
         try:
-            #local = "{{ dag_run.conf['local'] }}"
-            local = "true"
+            # local = "{{ dag_run.conf['local'] }}"
+            env_place = os.environ['AIRFLOW_ENV_PLACE']
             year = ts[:4]
             month = ts[5:7]
             day = ts[8:10]
             hour = ts[11:13]
-            if local == 'true':
-                path = f'/home/ale/Documents/market_analysis/back/{year}/{month}/{day}/{hour}/'
-            # get all the files in the folder
-            files = os.listdir(path)
+            files = []
+            if env_place == 'local':
+                path = f'/tmp/{year}/{month}/{day}/{hour}/'
+                # get all the files in the folder
+                files = os.listdir(path)
+            else:
+                # get all the files in the key
+                s3 = boto3.client('s3')
+                print(f"Looking for files in bucket: {s3_bucket} with prefix: /gas_averages/{year}/{month}/{day}/{hour}/")
+                response = s3.list_objects_v2(Bucket=s3_bucket,
+                                              Prefix=f'gas_averages/{year}/{month}/{day}/{hour}/')
+                print(f"Get files from bucket gave response: {response}")
+                if response['KeyCount'] == 0:
+                    print('No files found')
+                else:
+                    files = [x['Key'].split('/')[-1] for x in response['Contents']]
             return files
         except Exception as e:
             print(e)
             raise e
 
     @task()
-    def transform(files):
+    def transform(files, ts=None):
         # read each file one by one as a csv, and add up the value of the third column
+        year = ts[:4]
+        month = ts[5:7]
+        day = ts[8:10]
+        hour = ts[11:13]
+        env_place = os.environ['AIRFLOW_ENV_PLACE']
         total = 0
+        if len(files) == 0:
+            return {'avg': 0, 'amount': 0}
         for file in files:
-            path = '/home/ale/Documents/market_analysis/back/'
-            with open(path+file) as f:
-                reader = csv.reader(f)
+            if env_place == 'local':
+                path = '/tmp/back/'
+                with open(path+file) as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        total += float(row[2])
+            else:
+                s3 = boto3.client('s3')
+                response = s3.get_object(Bucket=s3_bucket,
+                                         Key=f'gas_averages/{year}/{month}/{day}/{hour}/{file}')
+                data = response['Body'].read().decode('utf-8')
+                reader = csv.reader(data.splitlines())
                 for row in reader:
-                    total += float(row[2])
+                    try:
+                        total += float(row[2])
+                    except Exception as e:
+                        print(f"Could not parse row: {row}")
         # calculate the average
         average = total / len(files)
         return {'avg': average, 'amount': len(files)}
 
     @task()
-    def load(dict_vals):
+    def load(dict_vals, ts=None):
         """
         Saves the average into a DynamoDB table.
 
@@ -64,17 +100,22 @@ def pipeline():
         """
         average = dict_vals['avg']
         transaction_count = dict_vals['amount']
+        if transaction_count == 0:
+            print('No transactions found')
+            return
         # get the date and hour from the execution date
-        date = "{{ execution_date.strftime('%Y-%m-%d') }}"
-        hour = "{{ execution_date.strftime('%H') }}"
+        date = ts[:10]
+        hour = ts[11:13]
         # create the item
         item = {
-            'date': date,
-            'hour': hour,
-            'average': average,
+            'DATE': date,
+            'HOUR': hour,
+            'average': Decimal(str(average)),
             'transactions': transaction_count
         }
         # save the item into the table
+        dynamodb = boto3.resource('dynamodb')
+        table = dynamodb.Table('GasCostPerHour')
         table.put_item(Item=item)
 
     files = extract()
