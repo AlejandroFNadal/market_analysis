@@ -25,7 +25,7 @@ def average(lst):
 def save_to_csv(timestamp, batch_key, avg_gas, usd_price):
     """Save the data to a CSV file, partitioned by year/month/day/hour."""
     # save with partition year/month/day/hour
-    path = f"{timestamp[:4]}/{timestamp[5:7]}/{timestamp[8:10]}/{timestamp[11:13]}"
+    path = f"/tmp/{timestamp[:4]}/{timestamp[5:7]}/{timestamp[8:10]}/{timestamp[11:13]}"
     os.makedirs(path, exist_ok=True)
     with open(f'{path}/{batch_key}.csv', 'w') as file:
         writer = csv.writer(file)
@@ -65,42 +65,51 @@ def get_ec2_ip_by_tag(tag_name, tag_value):
     """Get the public IP of an EC2 instance by its tag."""
     ec2_client = boto3.client('ec2')
     response = ec2_client.describe_instances(Filters=[{'Name': f'tag:{tag_name}', 'Values': [tag_value]}])
-    # Assuming only one instance with the given tag
-    instance = response['Reservations'][0]['Instances'][0]
-    return instance['PublicIpAddress']
+    # search for the first instance with an IP
+    for reservation in response['Reservations']:
+        for instance in reservation['Instances']:
+            try:
+                ip = instance['PublicIpAddress']
+            except KeyError:
+                continue
+            return ip
+    raise Exception(f"Could not find EC2 instance with tag {tag_name}={tag_value}")
+
+
+if os.environ['KAFKA_SERVER_AWS'] == 'true':
+    ip = get_ec2_ip_by_tag('Name', 'KafkaAirflowServer')
+else:
+    ip = 'localhost'
+conf = {
+    'bootstrap.servers': f'{ip}:9092',
+    'group.id': 'eth_consumer_group',
+    'auto.offset.reset': 'earliest'
+}
+try:
+    logger.debug("Creating consumer...")
+    consumer = Consumer(conf)
+    consumer.subscribe(['eth'])
+except Exception as e:
+    logger.error(f"Error creating consumer: {e}")
 
 
 def main():
     """Get message from Kafka, calculate stats, save to S3."""
-    if os.environ['KAFKA_SERVER_AWS'] == 'true':
-        ip = get_ec2_ip_by_tag('Name', 'KafkaAirflowServer')
-    else:
-        ip = 'localhost'
-    conf = {
-        'bootstrap.servers': f'{ip}:9092',
-        'group.id': 'eth_consumer_group',
-        'auto.offset.reset': 'earliest'
-    }
     try:
-        logger.debug("Creating consumer...")
-        consumer = Consumer(conf)
-        consumer.subscribe(['eth'])
-    except Exception as e:
-        logger.error(f"Error creating consumer: {e}")
-        return -1
-
-    try:
-        message = consumer.poll(5.0)
-        if message is None:
-            logger.debug("No message received")
-            return -1
-        if message.error():
-            logger.error(f"Error in message consumption: {message.error()}")
-        else:
-            block = json.loads(message.value().decode('utf-8'))
-            batch_key = message.key().decode('utf-8')
-            process_batch(batch_key, block)
-            return 0
+        # run under 30 seconds to avoid Lambda timeout
+        start_time = datetime.now()
+        while (datetime.now() - start_time).seconds < 30:
+            message = consumer.poll(2.0)
+            if message is None:
+                logger.debug("No message received")
+            if message.error():
+                logger.error(f"Error in message consumption: {message.error()}")
+            else:
+                insertion_timestamp = datetime.fromtimestamp(message.timestamp()[1] / 1000.0)
+                logger.info(f"Consumed message with insertion time {insertion_timestamp}")
+                block = json.loads(message.value().decode('utf-8'))
+                batch_key = message.key().decode('utf-8')
+                process_batch(batch_key, block)
     except KeyboardInterrupt:
         logger.info("Consumer interrupted. Closing connection...")
     except Exception as e:

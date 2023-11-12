@@ -45,8 +45,5 @@ sam deploy \
     --capabilities CAPABILITY_IAM \
     --parameter-overrides EC2KeyName=KeyName EC2AMI=amiid
 
-sam deploy\
-    --template-file packaged-template.yaml  \
-    --stack-name eth-analysis    \
-    --capabilities CAPABILITY_IAM     \
-    --parameter-overrides EC2KeyName=my-key EC2AMI=ami-06db4d78cb1d3bbf9 ETHERSCANAPIKEY=STHSTH
+sam deploy     --template-file packaged-template.yaml     --stack-name eth-analysis     --capabilities CAPABILITY_IAM     --parameter-overrides EC2KeyName=ec2-key EC2AMI=ami-06db4d78cb1d3bbf9 ETHERSCANAPIKEY=notMyApikey AIRFLOWFIRSTNAME=notMyName AIRFLOWLASTNAME=NotMySurname AIRFLOWPASS=notMyRealPass AIRFLOWEMAIL=notMyEmail@gmail.com
+
