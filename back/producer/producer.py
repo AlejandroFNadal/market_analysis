@@ -9,7 +9,7 @@ import os
 from dotenv import load_dotenv
 
 # create logger with 'DEBUG' level
-logger.add(sys.stderr, format="{time} {level} {message}", filter="my_module", level="DEBUG")
+logger.add(sys.stderr, format="{time} {level} {message}", filter="my_module", level="TRACE")
 
 load_dotenv()
 # Replace with your Etherscan API Key
@@ -91,7 +91,7 @@ def main():
         # we need to fetch the transaction from the last block number in dynamoDB to the latest_block_number
         boto3.setup_default_session(region_name='us-east-1')
         try:
-            if os.environ['DYNAMODB_SERVER_AWS'] == 'True':
+            if os.environ['DYNAMODB_SERVER_AWS'] == 'true':
                 dynamodb = boto3.resource('dynamodb')
             else:
                 dynamodb = boto3.resource('dynamodb', endpoint_url="http://localhost:8000")
@@ -110,12 +110,12 @@ def main():
             logger.info(f"Last processed block: {last_processed_block}")
         except KeyError:
             # this is the first execution, no data in dynamoDB
-            logger.info('No data in dynamoDB, setting last_processed_block to latest_block_number - 10')
-            last_processed_block = latest_block_number-11
+            logger.info('No data in dynamoDB, setting last_processed_block to latest_block_number - 6')
+            last_processed_block = latest_block_number-6
         # we want 10 confirmed blocks before we start processing. This is to avoid any reorgs
         # we are running in Lambda, so we should not overextend the execution
         start_time = time.time()
-        while last_processed_block < (latest_block_number - 10) and (time.time() - start_time) < 300:
+        while last_processed_block < (latest_block_number - 5) and (time.time() - start_time) < 20:
             block_to_process = last_processed_block + 1
             logger.info(f'Processing block number: {block_to_process}')
             transactions, timestamp = get_block_transactions(block_to_process, api_key)
@@ -124,8 +124,10 @@ def main():
             filtered_transactions = []
             for tx in transactions:
                 val = wei_to_eth(int(tx["value"], 16))
+                input_val = tx["input"]
+                gas_units = tx["gas"]
                 # gas_val = wei_to_eth(int(tx["gas"], 16))
-                if val > 0:
+                if val > 0 and input_val == '0x' and gas_units == '0x5208':
                     message = {
                         'from': tx["from"],
                         'to': tx["to"],
