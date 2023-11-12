@@ -18,9 +18,25 @@ Parameters:
     Description: Key for etherscan api
     Type: String
     ConstraintDescription: Without a key, the producer cannot reach to the API
+  AIRFLOWFIRSTNAME:
+    Description: First name of Airflow admin user
+    Type: String
+    ConstraintDescription: Please, offer a first name for the admin user of airflow
+  AIRFLOWLASTNAME:
+    Description: Last name of Airflow admin suer
+    Type: String
+    ConstraintDescription: Please, offer a last name for the admin user of airflow
+  AIRFLOWPASS:
+    Description: password for airflow admin user
+    Type: String
+    ConstraintDescription: Please, offer a password for the admin user of airflow
+  AIRFLOWEMAIL:
+    Description: email for airflow admin user
+    Type: String
+    ConstraintDescription: Please, offer an email for the admin user of airflow
+
 
 Resources:
-
   BlockConfigTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -71,7 +87,7 @@ Resources:
             #!/bin/bash
             # Update the system
             sudo apt-get update
-            sudo apt install tmux
+            sudo apt install tmux git
             # Install JDK for Kafka
             sudo apt-get install -y default-jdk
 
@@ -113,17 +129,37 @@ Resources:
             systemctl enable kafka-configure.service
             systemctl start kafka-configure.service
 
-            
             # Install Airflow
             sudo apt-get install -y python3-pip 
-            pip3 install apache-airflow --break-system-packages
-
+            pip install "apache-airflow[celery]==2.7.2" --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.7.2/constraints-3.8.txt" --break-system-packages
             # Initialize the Airflow DB (SQLite by default)
             airflow db init
+            # Create user 
+            airflow users create --username my_admin --role Admin --firstname ${AIRFLOWFIRSTNAME} --lastname ${AIRFLOWLASTNAME} --email ${AIRFLOWEMAIL} --password ${AIRFLOWPASS} 
+            # Create another daemon to manage airflow
+            touch /usr/local/bin/configure-airflow.sh
+            echo "#!/bin/bash" >/usr/local/bin/configure-airflow.sh
+            echo "export AIRFLOW_ENV_PLACE=aws" >> /usr/local/bin/configure-airflow.sh
+            echo "export S3_BUCKET_NAME=${!Ref DataBucket}" >> /usr/local/bin/configure-airflow.sh
+            echo "nohup airflow scheduler &" >> /usr/local/bin/configure-airflow.sh
+            echo "nohup airflow webserver &" >> /usr/local/bin/configure-airflow.sh
+            chmod +x /usr/local/bin/configure-airflow.sh 
+            
+            echo '[Unit]' > /etc/systemd/system/airflow-configure.service
+            echo 'Description=Configure and launch Airflow Server' >> /etc/systemd/system/airflow-configure.service
+            echo 'After=network.target' >> /etc/systemd/system/airflow-configure.service
+            echo ''  >> /etc/systemd/system/airflow-configure.service
+            echo '[Service]' >> /etc/systemd/system/airflow-configure.service
+            echo 'Type=oneshot' >> /etc/systemd/system/airflow-configure.service
+            echo 'ExecStart=/usr/local/bin/configure-airflow.sh' >> /etc/systemd/system/airflow-configure.service
+            echo 'RemainAfterExit=yes' >> /etc/systemd/system/airflow-configure.service
+            echo '' >> /etc/systemd/system/airflow-configure.service
+            echo '[Install]' >> /etc/systemd/system/airflow-configure.service
+            echo 'WantedBy=multi-user.target' >> /etc/systemd/system/airflow-configure.service
 
-            # Start Airflow 
-            nohup airflow scheduler &
-            nohup airflow webserver &
+            systemctl enable airflow-configure.service
+            systemctl start airflow-configure.service
+            
 
   
   EC2SecurityGroup:
@@ -165,6 +201,12 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
               - Effect: Allow
                 Action:
                   - s3:PutObject
