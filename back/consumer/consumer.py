@@ -19,6 +19,9 @@ SAVE_TO_S3 = os.environ['SAVE_TO_S3']
 
 def average(lst):
     """Return the average of a list of numbers."""
+    if len(lst) == 0:
+        logger.warning("Empty list passed to average function")
+        return 0
     return sum(lst) / len(lst)
 
 
@@ -102,7 +105,7 @@ def main():
             message = consumer.poll(2.0)
             if message is None:
                 logger.debug("No message received")
-            if message.error():
+            elif message.error():
                 logger.error(f"Error in message consumption: {message.error()}")
             else:
                 insertion_timestamp = datetime.fromtimestamp(message.timestamp()[1] / 1000.0)
@@ -115,8 +118,6 @@ def main():
     except Exception as e:
         logger.error(f"Error in message consumption: {e}")
         return -1
-    finally:
-        consumer.close()
 
 
 def handler(event, context):
