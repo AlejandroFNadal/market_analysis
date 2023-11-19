@@ -90,7 +90,8 @@ Resources:
             sudo apt install tmux git
             # Install JDK for Kafka
             sudo apt-get install -y default-jdk
-
+            git clone https://github.com/AlejandroFNadal/market_analysis.git
+            git checkout dev
             # Download Kafka
             wget "https://downloads.apache.org/kafka/3.6.0/kafka_2.13-3.6.0.tgz"
             tar -xvzf kafka_2.13-3.6.0.tgz
@@ -134,6 +135,7 @@ Resources:
             pip install "apache-airflow[celery]==2.7.2" --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.7.2/constraints-3.8.txt" --break-system-packages
             # Initialize the Airflow DB (SQLite by default)
             airflow db init
+            airflow migrate
             # Create user 
             airflow users create --username my_admin --role Admin --firstname ${AIRFLOWFIRSTNAME} --lastname ${AIRFLOWLASTNAME} --email ${AIRFLOWEMAIL} --password ${AIRFLOWPASS} 
             # Create another daemon to manage airflow

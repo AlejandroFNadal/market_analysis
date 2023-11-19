@@ -1,0 +1,5 @@
+./eth-gas-tracker/node_modules
+./back/packaged-template.yaml
+./back/producer/*
+./back/producer/*/*
+!./back/producer/producer.py
