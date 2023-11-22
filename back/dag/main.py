@@ -49,6 +49,7 @@ def pipeline():
                 print(f"Get files from bucket gave response: {response}")
                 if response['KeyCount'] == 0:
                     print('No files found')
+                    raise Exception('No files found')
                 else:
                     files = [x['Key'].split('/')[-1] for x in response['Contents']]
             return files
