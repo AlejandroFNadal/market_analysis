@@ -87,7 +87,7 @@ def main():
     try:
         latest_block_number = get_latest_block_number(api_key)
         # check what is the last block number in dynamoDB, it is a single value
-        # if the latest_block_number is greater than the last block number in dynamoDB, then 
+        # if the latest_block_number is greater than the last block number in dynamoDB, then
         # we need to fetch the transaction from the last block number in dynamoDB to the latest_block_number
         boto3.setup_default_session(region_name='us-east-1')
         try:
@@ -115,6 +115,7 @@ def main():
         # we want 10 confirmed blocks before we start processing. This is to avoid any reorgs
         # we are running in Lambda, so we should not overextend the execution
         start_time = time.time()
+        logger.info(f"We are {latest_block_number - last_processed_block} blocks behind, processing...")
         while last_processed_block < (latest_block_number - 5) and (time.time() - start_time) < 20:
             block_to_process = last_processed_block + 1
             logger.info(f'Processing block number: {block_to_process}')
@@ -122,6 +123,8 @@ def main():
             usd_price = get_eth_price(api_key)
             logger.info(f'Current ETH price in USD: {usd_price}')
             filtered_transactions = []
+            if len(transactions) == 0:
+                logger.warning(f'Block {block_to_process} has 0 transactions')
             for tx in transactions:
                 val = wei_to_eth(int(tx["value"], 16))
                 input_val = tx["input"]
@@ -149,6 +152,7 @@ def main():
                 logger.debug(f"Sending message to Kafka")
                 producer.produce('eth', key=batch_key, value=message_bytes)
                 producer.flush()
+                logger.info(f"Message sent to Kafka")
             except Exception as e:
                 logger.error(f'Failed to send message to Kafka: {e}')
                 raise Exception(f'Failed to send message to Kafka: {e}')
