@@ -82,6 +82,7 @@ def pipeline():
                 data = response['Body'].read().decode('utf-8')
                 reader = csv.reader(data.splitlines())
                 for row in reader:
+                    next(reader)  # skip the header
                     try:
                         total += float(row[2])
                     except Exception as e:
