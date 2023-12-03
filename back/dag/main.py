@@ -66,6 +66,7 @@ def pipeline():
         hour = ts[11:13]
         env_place = os.environ['AIRFLOW_ENV_PLACE']
         total = 0
+        usd_price = 0
         if len(files) == 0:
             return {'avg': 0, 'amount': 0}
         for file in files:
@@ -85,11 +86,13 @@ def pipeline():
                     next(reader)  # skip the header
                     try:
                         total += float(row[2])
+                        usd_price += float(row[3])
                     except Exception as e:
                         print(f"Could not parse row: {row}")
         # calculate the average
         average = total / len(files)
-        return {'avg': average, 'amount': len(files)}
+        usd_price_avg = usd_price / len(files)
+        return {'avg': average, 'usd_price_avg': usd_price_avg 'amount': len(files)}
 
     @task()
     def load(dict_vals, ts=None):
@@ -101,7 +104,8 @@ def pipeline():
         We also store the amout of transactions in a column called 'transactions'.
         """
         average = dict_vals['avg']
-        transaction_count = dict_vals['amount']
+        files_used = dict_vals['amount']
+        usd_price_avg = dict_vals['usd_price_avg']
         if transaction_count == 0:
             print('No transactions found')
             return
@@ -113,7 +117,8 @@ def pipeline():
             'DATE': date,
             'HOUR': hour,
             'average': Decimal(str(average)),
-            'transactions': transaction_count
+            'files_used': transaction_count,
+            'usd_price_avg': Decimal(str(usd_price_avg))
         }
         # save the item into the table
         dynamodb = boto3.resource('dynamodb')
