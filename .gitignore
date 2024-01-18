@@ -1,5 +1,8 @@
-./eth-gas-tracker/node_modules
-./back/packaged-template.yaml
-./back/producer/*
-./back/producer/*/*
-!./back/producer/producer.py
+/eth-gas-tracker/node_modules
+/back/packaged-template.yaml
+/back/producer/*
+/back/producer/*/*
+!/back/producer/producer.py
+/back/consumer/*
+!/back/consumer/consumer.py
+!/back/consumer/requirements.txt
