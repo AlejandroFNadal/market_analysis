@@ -45,7 +45,6 @@ export default async function handler(req, res) {
         body: responseBody
     };
     res.status(response.statusCode).send(response.body);
-    return response;
 }
 
 
