@@ -35,59 +35,27 @@ Parameters:
     Type: String
     ConstraintDescription: Please, offer an email for the admin user of airflow
 
-
 Resources:
-  BlockConfigTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: BlockConfig
-      AttributeDefinitions:
-        - AttributeName: config_type
-          AttributeType: S
-      KeySchema:
-        - AttributeName: config_type
-          KeyType: HASH
-      ProvisionedThroughput:
-        ReadCapacityUnits: 5
-        WriteCapacityUnits: 5
-
-  GasCostPerHourTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: GasCostPerHour
-      AttributeDefinitions:
-        - AttributeName: DATE
-          AttributeType: S
-        - AttributeName: HOUR
-          AttributeType: S
-      KeySchema:
-        - AttributeName: DATE
-          KeyType: HASH
-        - AttributeName: HOUR
-          KeyType: RANGE
-      ProvisionedThroughput:
-        ReadCapacityUnits: 10
-        WriteCapacityUnits: 5
-
   # EC2 Resources
-  EC2Instance:
+  EC2KafkaInstance:
     Type: 'AWS::EC2::Instance'
     Properties:
       InstanceType: t2.small
       ImageId: !Ref EC2AMI
       KeyName: !Ref EC2KeyName
       SecurityGroups:
-        - !Ref EC2SecurityGroup
+        - !Ref EC2KafkaSecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
       Tags:
         - Key: 'Name'
-          Value: 'KafkaAirflowServer'
+          Value: 'KafkaServer'
       UserData:
         Fn::Base64:
           !Sub |
             #!/bin/bash
             # Update the system
             sudo apt-get update
-            sudo apt install tmux git
+            sudo apt install tmux git python3.11-venv -y
             # Install JDK for Kafka
             sudo apt-get install -y default-jdk
             git clone https://github.com/AlejandroFNadal/market_analysis.git
@@ -130,8 +98,57 @@ Resources:
             systemctl enable kafka-configure.service
             systemctl start kafka-configure.service
 
+   
+  EC2KafkaSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable SSH access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0  # Restrict this to your IP for better security
+        - IpProtocol: 'tcp'
+          FromPort: 9092
+          ToPort: 9092
+          CidrIp: '0.0.0.0/0'  # Kafka port
+
+
+  EC2AirflowSecGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Allows for Airflow communication, as well as for Kafka consumers to run.
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0  # Restrict this to your IP for better security
+        - IpProtocol: 'tcp'
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: '0.0.0.0/0'
+
+  EC2AirflowInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: t2.small
+      ImageId: !Ref EC2AMI
+      KeyName: !Ref EC2KeyName
+      SecurityGroups:
+        - !Ref EC2AirflowSecGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tags:
+        - Key: 'Name'
+          Value: 'AirflowServer'
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+          - |
+            #!/bin/bash
+            sudo apt-get update
+            sudo apt install tmux git python3.11-venv -y
             # Install Airflow
-            sudo apt-get install -y python3-pip 
+            sudo apt-get install -y python3-pip
             pip install "apache-airflow[celery]==2.7.2" --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.7.2/constraints-3.8.txt" --break-system-packages
             # Initialize the Airflow DB (SQLite by default)
             airflow db init
@@ -142,7 +159,7 @@ Resources:
             touch /usr/local/bin/configure-airflow.sh
             echo "#!/bin/bash" >/usr/local/bin/configure-airflow.sh
             echo "export AIRFLOW_ENV_PLACE=aws" >> /usr/local/bin/configure-airflow.sh
-            echo "export S3_BUCKET_NAME=${!Ref DataBucket}" >> /usr/local/bin/configure-airflow.sh
+            echo "export S3_BUCKET_NAME=${EthAnalysisDataBucket}" >> /usr/local/bin/configure-airflow.sh
             echo "nohup airflow scheduler &" >> /usr/local/bin/configure-airflow.sh
             echo "nohup airflow webserver &" >> /usr/local/bin/configure-airflow.sh
             chmod +x /usr/local/bin/configure-airflow.sh 
@@ -161,29 +178,46 @@ Resources:
 
             systemctl enable airflow-configure.service
             systemctl start airflow-configure.service
-            
 
-  
-  EC2SecurityGroup:
-    Type: 'AWS::EC2::SecurityGroup'
-    Properties:
-      GroupDescription: Enable SSH access
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: '22'
-          ToPort: '22'
-          CidrIp: 0.0.0.0/0  # Restrict this to your IP for better security
-        - IpProtocol: 'tcp'
-          FromPort: 9092
-          ToPort: 9092
-          CidrIp: '0.0.0.0/0'  # Kafka port
-        - IpProtocol: 'tcp'
-          FromPort: 8080
-          ToPort: 8080
-          CidrIp: '0.0.0.0/0'  # Airflow port
-  # S3 Bucket
-  DataBucket:
-    Type: 'AWS::S3::Bucket'
+            # prepare consumer task
+            git clone https://github.com/AlejandroFNadal/market_analysis  
+            cd market_analysis
+            git checkout dev
+            cd back
+            cd consumer
+            python3 -m venv env
+            source env/bin/activate
+            pip3 install -r requirements.txt
+            echo 'KAFKA_SERVER_AWS=true' > .env
+            echo 'SAVE_TO_S3=true' >> .env
+            echo 'BLOCK_CONFIG_TABLE=BlockConfig' >> .env
+            echo 'DYNAMODB_SERVER_AWS=true' >> .env
+            echo 'GAS_COST_TABLE=GasCostPerHour' >> .env
+            echo "S3_BUCKET_NAME=${EthAnalysisDataBucket}" >> .env
+
+            touch /usr/local/bin/configure-consumer.sh
+            echo "#!/bin/bash" >/usr/local/bin/configure-consumer.sh
+            echo "/market_analysis/back/consumer/env/bin/python3 /market_analysis/back/consumer/consumer.py" >> /usr/local/bin/configure-consumer.sh
+            chmod +x /usr/local/bin/configure-consumer.sh 
+            
+            echo '[Unit]' > /etc/systemd/system/consumer.service
+            echo 'Description=Configure and launch Kafka consumer' >> /etc/systemd/system/consumer.service
+            echo 'After=network.target' >> /etc/systemd/system/consumer.service
+            echo ''  >> /etc/systemd/system/consumer.service
+            echo '[Service]' >> /etc/systemd/system/consumer.service
+            echo 'Type=oneshot' >> /etc/systemd/system/consumer.service
+            echo 'ExecStart=/usr/local/bin/configure-consumer.sh' >> /etc/systemd/system/consumer.service
+            echo 'RemainAfterExit=yes' >> /etc/systemd/system/consumer.service
+            echo '' >> /etc/systemd/system/consumer.service
+            echo '[Install]' >> /etc/systemd/system/consumer.service
+            echo 'WantedBy=multi-user.target' >> /etc/systemd/system/consumer.service
+          
+            systemctl enable consumer.service
+            systemctl start consumer.service
+          - EthAnalysisDataBucket:
+              Fn::ImportValue: eth-analysis-data-bucket
+
+
 
   # Lambda Execution Role
   LambdaExecutionRole:
@@ -214,7 +248,10 @@ Resources:
                   - s3:PutObject
                   - s3:GetObject
                 Resource:
-                  - !Sub arn:aws:s3:::${DataBucket}/*
+                  - !Join
+                      - ""
+                      - - !ImportValue eth-analysis-data-bucket-arn
+                        - "/*"
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -251,28 +288,6 @@ Resources:
           ETHERSCAN_API_KEY: !Ref ETHERSCANAPIKEY
           DYNAMODB_SERVER_AWS: True
 
-  ConsumerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: consumer.handler
-      Runtime: python3.10
-      CodeUri: consumer/
-      Timeout: 30
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Events:
-        ConsumerTimer:
-          Type: Schedule
-          Properties:
-            Schedule: rate(2 minutes)
-      Environment:
-        Variables:
-          BLOCK_CONFIG_TABLE: BlockConfig
-          GAS_COST_TABLE: GasCostPerHour
-          KAFKA_SERVER_AWS: True
-          S3_BUCKET_NAME: !Ref DataBucket 
-          SAVE_TO_S3: True              
-          DYNAMODB_SERVER_AWS: True
-            #
   # EC2 Instance Role
   EC2InstanceProfile:
     Type: 'AWS::IAM::InstanceProfile'
@@ -306,7 +321,9 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:Query
                 Resource:
-                  - !Sub arn:aws:s3:::${DataBucket}/*
+                  - Fn::Sub:
+                    - "${ImportedArn}/*"
+                    - ImportedArn: !ImportValue eth-analysis-data-bucket-arn
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/BlockConfig
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/GasCostPerHour
 
@@ -315,16 +332,3 @@ Outputs:
     Description: Producer Lambda Function ARN
     Value: !GetAtt ProducerFunction.Arn
 
-  ConsumerFunctionArn:
-    Description: Consumer Lambda Function ARN
-    Value: !GetAtt ConsumerFunction.Arn
-
-  BlockConfigTableArn:
-    Description: BlockConfig DynamoDB Table ARN
-    Value: !GetAtt BlockConfigTable.Arn
-
-  GasCostPerHourTableArn:
-    Description: GasCostPerHour DynamoDB Table ARN
-    Value: !GetAtt GasCostPerHourTable.Arn
-
- 

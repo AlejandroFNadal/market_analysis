@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: An AWS SAM template for DynamoDB tables and a S3 bucket that are used in a second template.
+
+Resources:
+  BlockConfigTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: BlockConfig
+      AttributeDefinitions:
+        - AttributeName: config_type
+          AttributeType: S
+      KeySchema:
+        - AttributeName: config_type
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  GasCostPerHourTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: GasCostPerHour
+      AttributeDefinitions:
+        - AttributeName: DATE
+          AttributeType: S
+        - AttributeName: HOUR
+          AttributeType: S
+      KeySchema:
+        - AttributeName: DATE
+          KeyType: HASH
+        - AttributeName: HOUR
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 10
+        WriteCapacityUnits: 5
+  # S3 Bucket
+  DataBucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Retain
+
+
+Outputs:
+  BlockConfigTableArn:
+    Description: BlockConfig DynamoDB Table ARN
+    Value: !GetAtt BlockConfigTable.Arn
+
+  GasCostPerHourTableArn:
+    Description: GasCostPerHour DynamoDB Table ARN
+    Value: !GetAtt GasCostPerHourTable.Arn
+
+  DataBucketArn:
+    Description: DataBucket S3
+    Value: !GetAtt DataBucket.Arn
+    Export:
+      Name: eth-analysis-data-bucket-arn
+
+  DataBucket:
+    Description: Name of DataBucket for ETH project
+    Value: !Ref DataBucket
+    Export:
+      Name: eth-analysis-data-bucket
