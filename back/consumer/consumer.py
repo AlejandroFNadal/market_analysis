@@ -5,7 +5,6 @@ import csv
 import boto3
 from datetime import datetime
 from confluent_kafka import Consumer
-from utils import wei_to_eth
 import os
 from dotenv import load_dotenv
 import sys
@@ -39,7 +38,7 @@ def save_to_csv(timestamp, batch_key, avg_gas, usd_price):
 def save_to_s3(timestamp, batch_key, avg_gas, usd_price):
     """Save the data to an S3 bucket."""
     # Ensure you have AWS credentials set up, either as environment variables or in a config file.
-    s3 = boto3.client('s3')
+    s3 = boto3.client('s3', region_name='us-east-1')
     bucket_name = os.environ['S3_BUCKET_NAME']
     key = f"gas_averages/{timestamp[:4]}/{timestamp[5:7]}/{timestamp[8:10]}/{timestamp[11:13]}/{batch_key}.csv"
     # Create CSV content
@@ -70,7 +69,7 @@ def process_batch(batch_key, block):
 
 def get_ec2_ip_by_tag(tag_name, tag_value):
     """Get the public IP of an EC2 instance by its tag."""
-    ec2_client = boto3.client('ec2')
+    ec2_client = boto3.client('ec2', region_name='us-east-1')
     response = ec2_client.describe_instances(Filters=[{'Name': f'tag:{tag_name}', 'Values': [tag_value]}])
     # search for the first instance with an IP
     for reservation in response['Reservations']:
@@ -85,7 +84,7 @@ def get_ec2_ip_by_tag(tag_name, tag_value):
 
 def setup_consumer():
     if os.environ['KAFKA_SERVER_AWS'] == 'true':
-        ip = get_ec2_ip_by_tag('Name', 'KafkaAirflowServer')
+        ip = get_ec2_ip_by_tag('Name', 'KafkaServer')
     else:
         ip = 'localhost'
     conf = {
