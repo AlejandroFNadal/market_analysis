@@ -150,6 +150,7 @@ Resources:
             # Install Airflow
             sudo apt-get install -y python3-pip
             pip install "apache-airflow[celery]==2.7.2" --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.7.2/constraints-3.8.txt" --break-system-packages
+            pip install boto3 --break-system-packages
             # Initialize the Airflow DB (SQLite by default)
             airflow db init
             airflow migrate
@@ -160,6 +161,7 @@ Resources:
             echo "#!/bin/bash" >/usr/local/bin/configure-airflow.sh
             echo "export AIRFLOW_ENV_PLACE=aws" >> /usr/local/bin/configure-airflow.sh
             echo "export S3_BUCKET_NAME=${EthAnalysisDataBucket}" >> /usr/local/bin/configure-airflow.sh
+            echo 'sed -i "s/load_examples = True=/load_examples = False/" /root/airflow/airflow.cfg' >> /usr/local/bin/configure-kafka.sh
             echo "nohup airflow scheduler &" >> /usr/local/bin/configure-airflow.sh
             echo "nohup airflow webserver &" >> /usr/local/bin/configure-airflow.sh
             chmod +x /usr/local/bin/configure-airflow.sh 
@@ -178,6 +180,9 @@ Resources:
 
             systemctl enable airflow-configure.service
             systemctl start airflow-configure.service
+
+            # create dag folder
+            mkdir /root/airflow/dags
 
             # prepare consumer task
             git clone https://github.com/AlejandroFNadal/market_analysis  
@@ -214,6 +219,8 @@ Resources:
           
             systemctl enable consumer.service
             systemctl start consumer.service
+            # move dag
+            cp /market_analysis/back/dag/main.py /root/airflow/dags/
           - EthAnalysisDataBucket:
               Fn::ImportValue: eth-analysis-data-bucket
 
@@ -317,6 +324,7 @@ Resources:
                 Action:
                   - s3:PutObject
                   - s3:GetObject
+                  - s3:ListBucket
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
@@ -324,6 +332,7 @@ Resources:
                 Resource:
                   - Fn::Sub:
                     - "${ImportedArn}/*"
+                    - "${ImportedArn}"
                     - ImportedArn: !ImportValue eth-analysis-data-bucket-arn
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/BlockConfig
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/GasCostPerHour
