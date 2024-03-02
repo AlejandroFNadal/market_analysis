@@ -16,6 +16,8 @@ logger.add(sys.stdout, level='DEBUG')
 load_dotenv()
 SAVE_TO_S3 = os.environ['SAVE_TO_S3']
 
+def wei_to_eth(wei):
+    return wei / 10**18  # 1 Ether equals 10^18 Wei
 
 def average(lst):
     """Return the average of a list of numbers."""
