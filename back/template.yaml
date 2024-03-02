@@ -61,25 +61,25 @@ Resources:
             git clone https://github.com/AlejandroFNadal/market_analysis.git
             git checkout dev
             # Download Kafka
-            wget "https://downloads.apache.org/kafka/3.6.0/kafka_2.13-3.6.0.tgz"
-            tar -xvzf kafka_2.13-3.6.0.tgz
-            cd kafka_2.13-3.6.0
+            wget "https://downloads.apache.org/kafka/3.6.1/kafka-3.6.1-src.tgz"
+            tar -xvzf kafka_2.13-3.6.1.tgz
+            cd kafka_2.13-3.6.1
             echo '#!/bin/bash' > /usr/local/bin/configure-kafka.sh
             echo 'PRIVATE_IP=$(curl http://169.254.169.254/latest/meta-data/local-ipv4)' >> /usr/local/bin/configure-kafka.sh
             echo 'PUBLIC_IP=$(curl http://169.254.169.254/latest/meta-data/public-ipv4)' >> /usr/local/bin/configure-kafka.sh
             echo '# Backup the original config file' >> /usr/local/bin/configure-kafka.sh
-            echo 'cp /kafka_2.13-3.6.0/config/server.properties  /kafka_2.13-3.6.0/config/server.properties.backup' >> /usr/local/bin/configure-kafka.sh
+            echo 'cp /kafka_2.13-3.6.1/config/server.properties  /kafka_2.13-3.6.1/config/server.properties.backup' >> /usr/local/bin/configure-kafka.sh
             echo '# Update the properties file' >> /usr/local/bin/configure-kafka.sh
 
             # Uncomment the listeners and advertised.listeners if they are commented
-            echo 'sed -i "s/^#listeners=/listeners=/" /kafka_2.13-3.6.0/config/server.properties' >> /usr/local/bin/configure-kafka.sh
-            echo 'sed -i "s/^#advertised.listeners=/advertised.listeners=/" /kafka_2.13-3.6.0/config/server.properties' >> /usr/local/bin/configure-kafka.sh
+            echo 'sed -i "s/^#listeners=/listeners=/" /kafka_2.13-3.6.1/config/server.properties' >> /usr/local/bin/configure-kafka.sh
+            echo 'sed -i "s/^#advertised.listeners=/advertised.listeners=/" /kafka_2.13-3.6.1/config/server.properties' >> /usr/local/bin/configure-kafka.sh
             # replacing the variables.
-            echo 'sed -i "s/^listeners=PLAINTEXT:\/\/.*/listeners=PLAINTEXT:\/\/$PRIVATE_IP:9092/"  /kafka_2.13-3.6.0/config/server.properties' >> /usr/local/bin/configure-kafka.sh
-            echo 'sed -i "s/^advertised.listeners=PLAINTEXT:\/\/.*/advertised.listeners=PLAINTEXT:\/\/$PUBLIC_IP:9092/" /kafka_2.13-3.6.0/config/server.properties' >> /usr/local/bin/configure-kafka.sh 
-            echo 'nohup /kafka_2.13-3.6.0/bin/zookeeper-server-start.sh /kafka_2.13-3.6.0/config/zookeeper.properties &' >> /usr/local/bin/configure-kafka.sh
+            echo 'sed -i "s/^listeners=PLAINTEXT:\/\/.*/listeners=PLAINTEXT:\/\/$PRIVATE_IP:9092/"  /kafka_2.13-3.6.1/config/server.properties' >> /usr/local/bin/configure-kafka.sh
+            echo 'sed -i "s/^advertised.listeners=PLAINTEXT:\/\/.*/advertised.listeners=PLAINTEXT:\/\/$PUBLIC_IP:9092/" /kafka_2.13-3.6.1/config/server.properties' >> /usr/local/bin/configure-kafka.sh 
+            echo 'nohup /kafka_2.13-3.6.0/bin/zookeeper-server-start.sh /kafka_2.13-3.6.1/config/zookeeper.properties &' >> /usr/local/bin/configure-kafka.sh
             echo 'sleep 5' >> /usr/local/bin/configure-kafka.sh
-            echo 'nohup /kafka_2.13-3.6.0/bin/kafka-server-start.sh /kafka_2.13-3.6.0/config/server.properties &' >> /usr/local/bin/configure-kafka.sh
+            echo 'nohup /kafka_2.13-3.6.0/bin/kafka-server-start.sh /kafka_2.13-3.6.1/config/server.properties &' >> /usr/local/bin/configure-kafka.sh
 
             
             # allow execution
@@ -266,6 +266,7 @@ Resources:
                   - ec2:DescribeInstances
                 Resource:
                   "*"
+              
 
   ProducerFunction:
     Type: AWS::Serverless::Function
@@ -326,7 +327,11 @@ Resources:
                     - ImportedArn: !ImportValue eth-analysis-data-bucket-arn
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/BlockConfig
                   - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/GasCostPerHour
-
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                Resource:
+                  "*"
 Outputs:
   ProducerFunctionArn:
     Description: Producer Lambda Function ARN
