@@ -69,7 +69,7 @@ def get_ec2_ip_by_tag(tag_name, tag_value):
 
 
 if os.environ['KAFKA_SERVER_AWS'] == 'true':
-    ip = get_ec2_ip_by_tag('Name', 'KafkaAirflowServer')
+    ip = get_ec2_ip_by_tag('Name', 'KafkaServer')
 else:
     ip = 'localhost'
 conf = {
